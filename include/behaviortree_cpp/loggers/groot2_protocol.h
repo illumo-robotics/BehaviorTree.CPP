@@ -72,6 +72,10 @@ struct RequestHeader
   uint8_t protocol = kProtocolID;
   RequestType type = RequestType::UNDEFINED;
 
+  static size_t size() {
+    return sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t);
+  }
+
   RequestHeader() = default;
 
   RequestHeader(RequestType type): type(type)
@@ -99,6 +103,10 @@ struct ReplyHeader
 {
   RequestHeader request;
   TreeUniqueUUID tree_id;
+
+  static size_t size() {
+    return RequestHeader::size() + 16;
+  }
 
   ReplyHeader() {
     tree_id.fill(0);
@@ -153,6 +161,7 @@ inline RequestHeader DeserializeRequestHeader(const std::string& buffer)
   offset += Deserialize(buffer.data(), offset, header.unique_id);
   return header;
 }
+
 
 inline ReplyHeader DeserializeReplyHeader(const std::string& buffer)
 {

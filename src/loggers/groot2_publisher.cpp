@@ -155,6 +155,18 @@ void Groot2Publisher::serverLoop()
 
   active_server_ = true;
   auto& socket = zmq_->server;
+
+  auto sendErrorReply = [this, &socket](const std::string& msg)
+  {
+    zmq::multipart_t error_msg;
+    error_msg.addstr("error");
+    error_msg.addstr(msg);
+    error_msg.send(socket);
+  };
+
+  // initialize last_heartbeat_
+  last_heartbeat_ = std::chrono::system_clock::now();
+
   while (active_server_)
   {
     zmq::multipart_t requestMsg;
@@ -166,11 +178,9 @@ void Groot2Publisher::serverLoop()
     last_heartbeat_ = std::chrono::system_clock::now();
 
     std::string const request_str = requestMsg[0].to_string();
-    if(request_str.size() != 6)
+    if(request_str.size() != Monitor::RequestHeader::size())
     {
-      zmq::message_t error_msg(std::string("error"));
-      socket.send(error_msg, zmq::send_flags::none);
-      std::cout << "Groot2Publisher: Wrong request size" << std::endl;
+      sendErrorReply("wrong request header");
       continue;
     }
 
@@ -182,14 +192,6 @@ void Groot2Publisher::serverLoop()
 
     zmq::multipart_t reply_msg;
     reply_msg.addstr( Monitor::SerializeHeader(reply_header) );
-
-    auto sendErrorReply = [this, &socket](const std::string& msg)
-    {
-      zmq::multipart_t error_msg;
-      error_msg.addstr("error");
-      error_msg.addstr(msg);
-      error_msg.send(socket);
-    };
 
     switch(request_header.type)
     {
@@ -205,7 +207,7 @@ void Groot2Publisher::serverLoop()
       case Monitor::RequestType::BLACKBOARD: {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
-          break;
+          continue;
         }
         std::string const bb_names_str = requestMsg[1].to_string();
         auto msg = generateBlackboardsDump(bb_names_str);
@@ -215,7 +217,7 @@ void Groot2Publisher::serverLoop()
       case Monitor::RequestType::BREAKPOINT_INSERT: {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
-          break;
+          continue;
         }
         auto str_parts = splitString(requestMsg[1].to_string_view(), ';');
         int node_uid = std::stoi( std::string(str_parts[0]) );
@@ -224,20 +226,20 @@ void Groot2Publisher::serverLoop()
         if(!insertBreakpoint(uint16_t(node_uid), once))
         {
           sendErrorReply("Node ID not found");
-          break;
+          continue;
         }
       } break;
 
       case Monitor::RequestType::BREAKPOINT_UNLOCK: {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
-          break;
+          continue;
         }
         auto str_parts = splitString(requestMsg[1].to_string_view(), ';');
 
         if(str_parts.size() < 2) {
           sendErrorReply("String must have at least 2 parts");
-          break;
+          continue;
         }
 
         int node_uid = std::stoi( std::string(str_parts[0]) );
@@ -257,7 +259,7 @@ void Groot2Publisher::serverLoop()
         if(!unlockBreakpoint(uint16_t(node_uid), desired_status, remove))
         {
           sendErrorReply("Node ID not found");
-          break;
+          continue;
         }
       } break;
 
@@ -268,19 +270,18 @@ void Groot2Publisher::serverLoop()
       case Monitor::RequestType::BREAKPOINT_REMOVE: {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
-          break;
+          continue;
         }
         int node_uid = std::stoi( requestMsg[1].to_string() );
         if(!removeBreakpoint(uint16_t(node_uid)))
         {
           sendErrorReply("Node ID not found");
-          break;
+          continue;
         }
       } break;
 
       default: {
-        zmq::message_t error_msg(std::string("error"));
-        socket.send(error_msg, zmq::send_flags::none);
+        sendErrorReply("Request not recognized");
         continue;
       }
     }

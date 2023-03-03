@@ -27,22 +27,23 @@ NodeStatus TreeNode::executeTick()
 {
   auto new_status = status_;
 
-  // injected callback
+  // injected pre-callback
+  if(status_ == NodeStatus::IDLE)
   {
-    std::unique_lock lk(callback_injection_mutex_);
-
-    if(status_ == NodeStatus::IDLE)
+    PreTickCallback  callback;
     {
-      if(pre_condition_callback_)
+      std::unique_lock lk(callback_injection_mutex_);
+      callback = pre_condition_callback_;
+    }
+    if(callback)
+    {
+      auto override_status = callback(*this);
+      if(isStatusCompleted(override_status))
       {
-        auto override_status = pre_condition_callback_(*this);
-        if(isStatusCompleted(override_status))
-        {
-          // return immediately and don't execute the actual tick()
-          new_status = override_status;
-          setStatus(new_status);
-          return new_status;
-        }
+        // return immediately and don't execute the actual tick()
+        new_status = override_status;
+        setStatus(new_status);
+        return new_status;
       }
     }
   }
@@ -61,12 +62,17 @@ NodeStatus TreeNode::executeTick()
 
   checkPostConditions(new_status);
 
-  // injected callback
+  // injected post callback
+  if(isStatusCompleted(new_status))
   {
-    std::unique_lock lk(callback_injection_mutex_);
-    if(post_condition_callback_ && isStatusCompleted(new_status))
+    PostTickCallback  callback;
     {
-      auto override_status = post_condition_callback_(*this, new_status);
+      std::unique_lock lk(callback_injection_mutex_);
+      callback = post_condition_callback_;
+    }
+    if(callback)
+    {
+      auto override_status = callback(*this, new_status);
       if(isStatusCompleted(override_status))
       {
         new_status = override_status;
