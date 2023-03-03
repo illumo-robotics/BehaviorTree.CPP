@@ -297,7 +297,7 @@ void Groot2Publisher::heartbeatLoop()
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     auto now = std::chrono::system_clock::now();
-    if( now - last_heartbeat_ > std::chrono::milliseconds(8000))
+    if( now - last_heartbeat_ > std::chrono::milliseconds(5000))
     {
       removeAllBreakpoints();
     }
