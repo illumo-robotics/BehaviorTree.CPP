@@ -301,7 +301,7 @@ void Groot2Publisher::heartbeatLoop()
     auto now = std::chrono::system_clock::now();
     bool prev_heartbeat = has_heartbeat;
 
-    has_heartbeat = ( now - last_heartbeat_ > std::chrono::milliseconds(5000));
+    has_heartbeat = ( now - last_heartbeat_ < std::chrono::milliseconds(5000));
 
     // if we loose or gain heartbeat, disable/enable all nodes
     if(has_heartbeat != prev_heartbeat)
