@@ -292,14 +292,33 @@ void Groot2Publisher::serverLoop()
 
 void Groot2Publisher::heartbeatLoop()
 {
+  bool has_heartbeat = true;
+
   while (active_server_)
   {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     auto now = std::chrono::system_clock::now();
-    if( now - last_heartbeat_ > std::chrono::milliseconds(5000))
+    bool prev_heartbeat = has_heartbeat;
+
+    has_heartbeat = ( now - last_heartbeat_ > std::chrono::milliseconds(5000));
+
+    // if we loose or gain heartbeat, disable/enable all nodes
+    if(has_heartbeat != prev_heartbeat)
     {
-      removeAllBreakpoints();
+      for(auto& [node_uid, breakpoint]: pre_breakpoints_)
+      {
+        std::unique_lock lk(breakpoint->mutex);
+        breakpoint->enabled = has_heartbeat;
+        // when disablying, remember to also wake up blocked ones
+        if(!has_heartbeat && breakpoint->is_interactive)
+        {
+          breakpoint->desired_result = NodeStatus::SKIPPED;
+          breakpoint->ready = true;
+          lk.unlock();
+          breakpoint->wakeup.notify_all();
+        }
+      }
     }
   }
 }
@@ -346,19 +365,25 @@ bool Groot2Publisher::insertBreakpoint(uint16_t node_uid, bool once)
   node->setPreTickFunction(
       [breakpoint, this](TreeNode& node) -> NodeStatus
       {
-        // Notify that a breakpoint was reached, using the zmq_->publisher
+        std::unique_lock lk(breakpoint->mutex);
+        if(!breakpoint->enabled)
         {
-          Monitor::RequestHeader breakpoint_request(Monitor::BREAKPOINT_NOTIFY);
-          zmq::multipart_t request_msg;
-          request_msg.addstr( Monitor::SerializeHeader(breakpoint_request) );
-          request_msg.addstr(std::to_string(breakpoint->node_uid));
-          request_msg.send(zmq_->publisher);
+          return NodeStatus::SKIPPED;
         }
 
+        // Notify that a breakpoint was reached, using the zmq_->publisher
+        Monitor::RequestHeader breakpoint_request(Monitor::BREAKPOINT_NOTIFY);
+        zmq::multipart_t request_msg;
+        request_msg.addstr( Monitor::SerializeHeader(breakpoint_request) );
+        request_msg.addstr(std::to_string(breakpoint->node_uid));
+        request_msg.send(zmq_->publisher);
+
         // wait until someone wake us up
-        std::unique_lock lk(breakpoint->mutex);
-        breakpoint->wakeup.wait(lk, [breakpoint]() { return breakpoint->ready; } );
-        breakpoint->ready = false;
+        if(breakpoint->is_interactive)
+        {
+          breakpoint->wakeup.wait(lk, [breakpoint]() { return breakpoint->ready; } );
+          breakpoint->ready = false;
+        }
 
         // self-destruction at the end of this lambda function
         if(breakpoint->remove_when_done)
@@ -439,30 +464,16 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
 
 void Groot2Publisher::removeAllBreakpoints()
 {
+  std::vector<uint16_t> uids;
   for(auto [node_uid, breakpoint]: pre_breakpoints_)
   {
-    auto it = nodes_by_uid_.find(node_uid);
-    if( it == nodes_by_uid_.end())
-    {
-      continue;
-    }
-    TreeNode::Ptr node = it->second.lock();
-    if(!node)
-    {
-      continue;
-    }
-
-    // Unlock breakpoint, just in case
-    {
-      std::scoped_lock lk(breakpoint->mutex);
-      breakpoint->desired_result = NodeStatus::SKIPPED;
-      breakpoint->ready = true;
-      breakpoint->remove_when_done = true;
-    }
-    node->setPreTickFunction({});
-    breakpoint->wakeup.notify_all();
+    uids.push_back(node_uid);
   }
-  pre_breakpoints_.clear();
+
+  for(auto node_uid: uids)
+  {
+    removeBreakpoint(node_uid);
+  }
 }
 
 }   // namespace BT

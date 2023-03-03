@@ -60,11 +60,26 @@ class Groot2Publisher : public StatusChangeLogger
 
   struct Breakpoint
   {
+    // used to enable/disable the breakpoint
+    bool enabled = true;
+
     int node_uid = -1;
+
+    // interactive breakpoints are unblucked using unlockBreakpoint()
+    bool is_interactive = true;
+
+    // used by interactive breakpoints to wait for unlocking
     std::condition_variable wakeup;
+
     std::mutex mutex;
+
+    // set to true to unlock an interactive breakpoint
     bool ready = false;
+
+    // once finished se-fdestroy
     bool remove_when_done = false;
+
+    // result to be returned
     NodeStatus desired_result = NodeStatus::SKIPPED;
   };
 
