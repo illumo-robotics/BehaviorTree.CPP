@@ -303,17 +303,16 @@ void Groot2Publisher::heartbeatLoop()
 
     has_heartbeat = ( now - last_heartbeat_ < std::chrono::milliseconds(5000));
 
-    // if we loose or gain heartbeat, disable/enable all nodes
+    // if we loose or gain heartbeat, disable/enable all breakpoints
     if(has_heartbeat != prev_heartbeat)
     {
       for(auto& [node_uid, breakpoint]: pre_breakpoints_)
       {
         std::unique_lock lk(breakpoint->mutex);
         breakpoint->enabled = has_heartbeat;
-        // when disablying, remember to also wake up blocked ones
-        if(!has_heartbeat && breakpoint->is_interactive)
+        // when disabling, remember to wake up blocked ones
+        if(!breakpoint->enabled && breakpoint->is_interactive)
         {
-          breakpoint->desired_result = NodeStatus::SKIPPED;
           breakpoint->ready = true;
           lk.unlock();
           breakpoint->wakeup.notify_all();
@@ -383,11 +382,16 @@ bool Groot2Publisher::insertBreakpoint(uint16_t node_uid, bool once)
         {
           breakpoint->wakeup.wait(lk, [breakpoint]() { return breakpoint->ready; } );
           breakpoint->ready = false;
+          // wait was unblocked but it could be the breakpoint becoming disabled.
+          // in this case, just skip
+          if(!breakpoint->enabled) {
+            return NodeStatus::SKIPPED;
+          }
         }
 
-        // self-destruction at the end of this lambda function
         if(breakpoint->remove_when_done)
         {
+          // self-destruction at the end of this lambda function
           pre_breakpoints_.erase(breakpoint->node_uid);
           node.setPreTickFunction({});
         }
@@ -451,9 +455,8 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
   // Unlock breakpoint, just in case
   {
     std::scoped_lock lk(breakpoint->mutex);
-    breakpoint->desired_result = NodeStatus::SKIPPED;
+    breakpoint->enabled = false;
     breakpoint->ready = true;
-    breakpoint->remove_when_done = true;
   }
   node->setPreTickFunction({});
   breakpoint->wakeup.notify_all();
