@@ -220,13 +220,58 @@ void Groot2Publisher::serverLoop()
           continue;
         }
         auto str_parts = splitString(requestMsg[1].to_string_view(), ';');
-        int node_uid = std::stoi( std::string(str_parts[0]) );
-        bool once = str_parts.size() >= 2 && str_parts[1] == "once";
+        uint16_t const node_uid = uint16_t(std::stoi( std::string(str_parts[0])));
 
-        if(!insertBreakpoint(uint16_t(node_uid), once))
+        bool once = false;
+        bool interactive = true;
+        NodeStatus desired_result = NodeStatus::SKIPPED;
+        for(size_t i=1; i<str_parts.size(); i++)
         {
-          sendErrorReply("Node ID not found");
-          continue;
+          if(str_parts[i] == "once")
+          {
+            once = true;
+          }
+          else if(str_parts[i] == "force_success")
+          {
+            interactive = false;
+            desired_result = NodeStatus::SUCCESS;
+          }
+          else if(str_parts[i] == "force_failure")
+          {
+            interactive = false;
+            desired_result = NodeStatus::FAILURE;
+          }
+        }
+
+        auto breakpoint = getBreakpoint(node_uid);
+        // if it exists already, we want to modify this in place
+        if(breakpoint) {
+          {
+            std::unique_lock lk(breakpoint->mutex);
+            bool was_interactive = breakpoint->is_interactive;
+            breakpoint->is_interactive = interactive;
+            breakpoint->remove_when_done = once;
+            breakpoint->desired_result = desired_result;
+            // if it WAS interactive and it is not anymore, unlock it
+            if(was_interactive && !interactive)
+            {
+              lk.unlock();
+              breakpoint->wakeup.notify_all();
+            }
+          }
+        }
+        else // if not found, create a new one
+        {
+          breakpoint = std::make_shared<Breakpoint>();
+          breakpoint->node_uid = node_uid;
+          breakpoint->is_interactive = interactive;
+          breakpoint->remove_when_done = once;
+
+          if(!insertBreakpoint(breakpoint))
+          {
+            sendErrorReply("Node ID not found");
+            continue;
+          }
         }
       } break;
 
@@ -313,7 +358,6 @@ void Groot2Publisher::heartbeatLoop()
         // when disabling, remember to wake up blocked ones
         if(!breakpoint->enabled && breakpoint->is_interactive)
         {
-          breakpoint->ready = true;
           lk.unlock();
           breakpoint->wakeup.notify_all();
         }
@@ -343,8 +387,9 @@ Groot2Publisher::generateBlackboardsDump(const std::string &bb_list)
   return nlohmann::json::to_msgpack(json);
 }
 
-bool Groot2Publisher::insertBreakpoint(uint16_t node_uid, bool once)
+bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint)
 {
+  auto const node_uid = breakpoint->node_uid;
   auto it = nodes_by_uid_.find(node_uid);
   if( it == nodes_by_uid_.end())
   {
@@ -356,47 +401,48 @@ bool Groot2Publisher::insertBreakpoint(uint16_t node_uid, bool once)
     return false;
   }
 
-  auto breakpoint = std::make_shared<Breakpoint>();
-  breakpoint->node_uid = node_uid;
-  breakpoint->remove_when_done = once;
+  auto injectedCallback = [breakpoint, this](TreeNode& node) -> NodeStatus
+  {
+    std::unique_lock lk(breakpoint->mutex);
+    if(!breakpoint->enabled)
+    {
+      return NodeStatus::SKIPPED;
+    }
+
+    // Notify that a breakpoint was reached, using the zmq_->publisher
+    Monitor::RequestHeader breakpoint_request(Monitor::BREAKPOINT_NOTIFY);
+    zmq::multipart_t request_msg;
+    request_msg.addstr( Monitor::SerializeHeader(breakpoint_request) );
+    request_msg.addstr(std::to_string(breakpoint->node_uid));
+    request_msg.send(zmq_->publisher);
+
+    // wait until someone wake us up
+    if(breakpoint->is_interactive)
+    {
+      breakpoint->wakeup.wait(lk, [breakpoint]() {
+        return breakpoint->ready || !breakpoint->enabled;  } );
+
+      breakpoint->ready = false;
+      // wait was unblocked but it could be the breakpoint becoming disabled.
+      // in this case, just skbreakpointip
+      if(!breakpoint->enabled) {
+        return NodeStatus::SKIPPED;
+      }
+    }
+
+    if(breakpoint->remove_when_done)
+    {
+      // self-destruction at the end of this lambda function
+      std::unique_lock lk(breakpoints_map_mutex_);
+      pre_breakpoints_.erase(breakpoint->node_uid);
+      node.setPreTickFunction({});
+    }
+    return breakpoint->desired_result;
+  };
+
+  std::unique_lock lk(breakpoints_map_mutex_);
   pre_breakpoints_[node_uid] = breakpoint;
-
-  node->setPreTickFunction(
-      [breakpoint, this](TreeNode& node) -> NodeStatus
-      {
-        std::unique_lock lk(breakpoint->mutex);
-        if(!breakpoint->enabled)
-        {
-          return NodeStatus::SKIPPED;
-        }
-
-        // Notify that a breakpoint was reached, using the zmq_->publisher
-        Monitor::RequestHeader breakpoint_request(Monitor::BREAKPOINT_NOTIFY);
-        zmq::multipart_t request_msg;
-        request_msg.addstr( Monitor::SerializeHeader(breakpoint_request) );
-        request_msg.addstr(std::to_string(breakpoint->node_uid));
-        request_msg.send(zmq_->publisher);
-
-        // wait until someone wake us up
-        if(breakpoint->is_interactive)
-        {
-          breakpoint->wakeup.wait(lk, [breakpoint]() { return breakpoint->ready; } );
-          breakpoint->ready = false;
-          // wait was unblocked but it could be the breakpoint becoming disabled.
-          // in this case, just skip
-          if(!breakpoint->enabled) {
-            return NodeStatus::SKIPPED;
-          }
-        }
-
-        if(breakpoint->remove_when_done)
-        {
-          // self-destruction at the end of this lambda function
-          pre_breakpoints_.erase(breakpoint->node_uid);
-          node.setPreTickFunction({});
-        }
-        return breakpoint->desired_result;
-      });
+  node->setPreTickFunction(injectedCallback);
 
   return true;
 }
@@ -413,21 +459,20 @@ bool Groot2Publisher::unlockBreakpoint(uint16_t node_uid, NodeStatus result, boo
   {
     return false;
   }
-  auto bk_it = pre_breakpoints_.find(node_uid);
-  if( bk_it == pre_breakpoints_.end())
-  {
-    return false;
-  }
 
-  auto breakpoint = bk_it->second;
+  auto breakpoint = getBreakpoint(node_uid);
 
   {
-    std::scoped_lock lk(breakpoint->mutex);
+    std::unique_lock lk(breakpoint->mutex);
     breakpoint->desired_result = result;
-    breakpoint->ready = true;
     breakpoint->remove_when_done |= remove;
+    if(breakpoint->is_interactive)
+    {
+      breakpoint->ready = true;
+      lk.unlock();
+      breakpoint->wakeup.notify_all();
+    }
   }
-  breakpoint->wakeup.notify_all();
   return true;
 }
 
@@ -444,23 +489,24 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
     return false;
   }
 
-  auto bk_it = pre_breakpoints_.find(node_uid);
-  if( bk_it == pre_breakpoints_.end())
-  {
-    return false;
-  }
+  auto breakpoint = getBreakpoint(node_uid);
 
-  auto breakpoint = bk_it->second;
-
-  // Unlock breakpoint, just in case
   {
-    std::scoped_lock lk(breakpoint->mutex);
-    breakpoint->enabled = false;
-    breakpoint->ready = true;
+    std::unique_lock lk(breakpoints_map_mutex_);
+    pre_breakpoints_.erase(node_uid);
   }
   node->setPreTickFunction({});
-  breakpoint->wakeup.notify_all();
-  pre_breakpoints_.erase(bk_it);
+
+  // Disable breakpoint, if it was interactive and blocked
+  {
+    std::unique_lock lk(breakpoint->mutex);
+    if(breakpoint->is_interactive)
+    {
+      breakpoint->enabled = false;
+      lk.unlock();
+      breakpoint->wakeup.notify_all();
+    }
+  }
 
   return true;
 }
@@ -468,15 +514,29 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
 void Groot2Publisher::removeAllBreakpoints()
 {
   std::vector<uint16_t> uids;
-  for(auto [node_uid, breakpoint]: pre_breakpoints_)
   {
-    uids.push_back(node_uid);
+    std::unique_lock lk(breakpoints_map_mutex_);
+    for(auto [node_uid, breakpoint]: pre_breakpoints_)
+    {
+      uids.push_back(node_uid);
+    }
   }
 
   for(auto node_uid: uids)
   {
     removeBreakpoint(node_uid);
   }
+}
+
+Groot2Publisher::Breakpoint::Ptr Groot2Publisher::getBreakpoint(uint16_t node_uid)
+{
+    std::unique_lock lk(breakpoints_map_mutex_);
+    auto bk_it = pre_breakpoints_.find(node_uid);
+    if( bk_it == pre_breakpoints_.end())
+    {
+    return {};
+    }
+    return bk_it->second;
 }
 
 }   // namespace BT

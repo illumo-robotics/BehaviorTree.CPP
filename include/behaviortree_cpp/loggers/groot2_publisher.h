@@ -17,53 +17,15 @@ class Groot2Publisher : public StatusChangeLogger
   ~Groot2Publisher() override;
 
   private:
-  void callback(Duration timestamp,
-                const TreeNode& node,
-                NodeStatus prev_status,
-                NodeStatus status) override;
-
-  void flush() override;
-
-  void serverLoop();
-
-  void heartbeatLoop();
-
-  void updateStatusBuffer();
-
-  std::vector<uint8_t> generateBlackboardsDump(const std::string& bb_list);
-
-  bool insertBreakpoint(uint16_t node_uid, bool once);
-
-  bool unlockBreakpoint(uint16_t node_uid, NodeStatus result, bool remove);
-
-  bool removeBreakpoint(uint16_t node_uid);
-
-  void removeAllBreakpoints();
-
-  unsigned server_port_ = 0;
-  std::string server_address_;
-  std::string publisher_address_;
-
-  std::string tree_xml_;
-
-  std::atomic_bool active_server_;
-  std::thread server_thread_;
-
-  std::mutex status_mutex_;
-
-  std::unordered_map<uint16_t, char*> buffer_ptr_;
-  std::string status_buffer_;
-
-  // weak reference to the tree.
-  std::unordered_map<std::string, std::weak_ptr<BT::Tree::Subtree>> subtrees_;
-  std::unordered_map<uint16_t, std::weak_ptr<BT::TreeNode>> nodes_by_uid_;
 
   struct Breakpoint
   {
+    using Ptr = std::shared_ptr<Breakpoint>;
+
     // used to enable/disable the breakpoint
     bool enabled = true;
 
-    int node_uid = -1;
+    uint16_t node_uid = 0;
 
     // interactive breakpoints are unblucked using unlockBreakpoint()
     bool is_interactive = true;
@@ -83,7 +45,52 @@ class Groot2Publisher : public StatusChangeLogger
     NodeStatus desired_result = NodeStatus::SKIPPED;
   };
 
+  void callback(Duration timestamp,
+                const TreeNode& node,
+                NodeStatus prev_status,
+                NodeStatus status) override;
+
+  void flush() override;
+
+  void serverLoop();
+
+  void heartbeatLoop();
+
+  void updateStatusBuffer();
+
+  std::vector<uint8_t> generateBlackboardsDump(const std::string& bb_list);
+
+  bool insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint);
+
+  bool unlockBreakpoint(uint16_t node_uid, NodeStatus result, bool remove);
+
+  bool removeBreakpoint(uint16_t node_uid);
+
+  void removeAllBreakpoints();
+
+  Breakpoint::Ptr getBreakpoint(uint16_t node_uid);
+
+  unsigned server_port_ = 0;
+  std::string server_address_;
+  std::string publisher_address_;
+
+  std::string tree_xml_;
+
+  std::atomic_bool active_server_;
+  std::thread server_thread_;
+
+  std::mutex status_mutex_;
+
+  std::unordered_map<uint16_t, char*> buffer_ptr_;
+  std::string status_buffer_;
+
+  // weak reference to the tree.
+  std::unordered_map<std::string, std::weak_ptr<BT::Tree::Subtree>> subtrees_;
+  std::unordered_map<uint16_t, std::weak_ptr<BT::TreeNode>> nodes_by_uid_;
+
+  std::mutex breakpoints_map_mutex_;
   std::unordered_map<uint16_t, std::shared_ptr<Breakpoint>> pre_breakpoints_;
+
 
   std::chrono::system_clock::time_point last_heartbeat_;
 
