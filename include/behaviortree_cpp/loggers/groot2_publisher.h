@@ -38,7 +38,7 @@ class Groot2Publisher : public StatusChangeLogger
     // set to true to unlock an interactive breakpoint
     bool ready = false;
 
-    // once finished se-fdestroy
+    // once finished self-destroy
     bool remove_when_done = false;
 
     // result to be returned

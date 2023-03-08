@@ -156,7 +156,7 @@ void Groot2Publisher::serverLoop()
   active_server_ = true;
   auto& socket = zmq_->server;
 
-  auto sendErrorReply = [this, &socket](const std::string& msg)
+  auto sendErrorReply = [&socket](const std::string& msg)
   {
     zmq::multipart_t error_msg;
     error_msg.addstr("error");
@@ -245,19 +245,18 @@ void Groot2Publisher::serverLoop()
 
         auto breakpoint = getBreakpoint(node_uid);
         // if it exists already, we want to modify this in place
-        if(breakpoint) {
+        if(breakpoint)
+        {
+          std::unique_lock<std::mutex> lk(breakpoint->mutex);
+          bool was_interactive = breakpoint->is_interactive;
+          breakpoint->is_interactive = interactive;
+          breakpoint->remove_when_done = once;
+          breakpoint->desired_result = desired_result;
+          // if it WAS interactive and it is not anymore, unlock it
+          if(was_interactive && !interactive)
           {
-            std::unique_lock lk(breakpoint->mutex);
-            bool was_interactive = breakpoint->is_interactive;
-            breakpoint->is_interactive = interactive;
-            breakpoint->remove_when_done = once;
-            breakpoint->desired_result = desired_result;
-            // if it WAS interactive and it is not anymore, unlock it
-            if(was_interactive && !interactive)
-            {
-              lk.unlock();
-              breakpoint->wakeup.notify_all();
-            }
+            lk.unlock();
+            breakpoint->wakeup.notify_all();
           }
         }
         else // if not found, create a new one
@@ -266,6 +265,7 @@ void Groot2Publisher::serverLoop()
           breakpoint->node_uid = node_uid;
           breakpoint->is_interactive = interactive;
           breakpoint->remove_when_done = once;
+          breakpoint->desired_result = desired_result;
 
           if(!insertBreakpoint(breakpoint))
           {
@@ -353,7 +353,7 @@ void Groot2Publisher::heartbeatLoop()
     {
       for(auto& [node_uid, breakpoint]: pre_breakpoints_)
       {
-        std::unique_lock lk(breakpoint->mutex);
+        std::unique_lock<std::mutex> lk(breakpoint->mutex);
         breakpoint->enabled = has_heartbeat;
         // when disabling, remember to wake up blocked ones
         if(!breakpoint->enabled && breakpoint->is_interactive)
@@ -403,7 +403,7 @@ bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint)
 
   auto injectedCallback = [breakpoint, this](TreeNode& node) -> NodeStatus
   {
-    std::unique_lock lk(breakpoint->mutex);
+    std::unique_lock<std::mutex> lk(breakpoint->mutex);
     if(!breakpoint->enabled)
     {
       return NodeStatus::SKIPPED;
@@ -433,14 +433,14 @@ bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint)
     if(breakpoint->remove_when_done)
     {
       // self-destruction at the end of this lambda function
-      std::unique_lock lk(breakpoints_map_mutex_);
+      std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
       pre_breakpoints_.erase(breakpoint->node_uid);
       node.setPreTickFunction({});
     }
     return breakpoint->desired_result;
   };
 
-  std::unique_lock lk(breakpoints_map_mutex_);
+  std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
   pre_breakpoints_[node_uid] = breakpoint;
   node->setPreTickFunction(injectedCallback);
 
@@ -461,9 +461,13 @@ bool Groot2Publisher::unlockBreakpoint(uint16_t node_uid, NodeStatus result, boo
   }
 
   auto breakpoint = getBreakpoint(node_uid);
+  if(!breakpoint)
+  {
+    return false;
+  }
 
   {
-    std::unique_lock lk(breakpoint->mutex);
+    std::unique_lock<std::mutex> lk(breakpoint->mutex);
     breakpoint->desired_result = result;
     breakpoint->remove_when_done |= remove;
     if(breakpoint->is_interactive)
@@ -490,16 +494,20 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
   }
 
   auto breakpoint = getBreakpoint(node_uid);
+  if(!breakpoint)
+  {
+    return false;
+  }
 
   {
-    std::unique_lock lk(breakpoints_map_mutex_);
+    std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
     pre_breakpoints_.erase(node_uid);
   }
   node->setPreTickFunction({});
 
   // Disable breakpoint, if it was interactive and blocked
   {
-    std::unique_lock lk(breakpoint->mutex);
+    std::unique_lock<std::mutex> lk(breakpoint->mutex);
     if(breakpoint->is_interactive)
     {
       breakpoint->enabled = false;
@@ -515,7 +523,7 @@ void Groot2Publisher::removeAllBreakpoints()
 {
   std::vector<uint16_t> uids;
   {
-    std::unique_lock lk(breakpoints_map_mutex_);
+    std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
     for(auto [node_uid, breakpoint]: pre_breakpoints_)
     {
       uids.push_back(node_uid);
@@ -530,7 +538,7 @@ void Groot2Publisher::removeAllBreakpoints()
 
 Groot2Publisher::Breakpoint::Ptr Groot2Publisher::getBreakpoint(uint16_t node_uid)
 {
-    std::unique_lock lk(breakpoints_map_mutex_);
+    std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
     auto bk_it = pre_breakpoints_.find(node_uid);
     if( bk_it == pre_breakpoints_.end())
     {
