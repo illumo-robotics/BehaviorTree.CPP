@@ -19,41 +19,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 #---- project configuration ----
 option(BTCPP_SHARED_LIBS "Build shared libraries" ON)
-option(BTCPP_ENABLE_COROUTINES "Enable boost coroutines" ON)
 option(BTCPP_MANUAL_SELECTOR "Build manual selector node" ON)
 option(BTCPP_BUILD_TOOLS "Build commandline tools" ON)
 option(BTCPP_EXAMPLES   "Build tutorials and examples" ON)
 option(BTCPP_UNIT_TESTS "Build the unit tests" ON)
 
 option(USE_V3_COMPATIBLE_NAMES  "Use some alias to compile more easily old 3.x code" OFF)
-
-#---- Include boost to add coroutines ----
-if(BTCPP_ENABLE_COROUTINES)
-    find_package(Boost COMPONENTS coroutine QUIET)
-
-    if(Boost_FOUND)
-        string(REPLACE "." "0" Boost_VERSION_NODOT ${Boost_VERSION})
-        if(NOT Boost_VERSION_NODOT VERSION_LESS 105900)
-            message(STATUS "Found boost::coroutine2.")
-            add_definitions(-DBT_BOOST_COROUTINE2)
-            set(BT_COROUTINES_FOUND true)
-        elseif(NOT Boost_VERSION_NODOT VERSION_LESS 105300)
-            message(STATUS "Found boost::coroutine.")
-            add_definitions(-DBT_BOOST_COROUTINE)
-            set(BT_COROUTINES_FOUND true)
-        endif()
-    endif()
-
-    if(NOT DEFINED BT_COROUTINES_FOUND)
-        message(STATUS "Boost coroutines disabled. Install Boost (version 1.59+ recommended).")
-    endif()
-else()
-    message(STATUS "Boost coroutines disabled by CMake option.")
-endif()
-
-if(NOT DEFINED BT_COROUTINES_FOUND)
-    add_definitions(-DBT_NO_COROUTINES)
-endif()
 
 if(USE_V3_COMPATIBLE_NAMES)
     add_definitions(-DUSE_BTCPP3_OLD_NAMES)
@@ -223,13 +194,6 @@ if(ZMQ_FOUND)
     target_include_directories(${BEHAVIOR_TREE_LIBRARY} PRIVATE
         ${ZMQ_INCLUDE_DIRS} )
     target_compile_definitions(${BEHAVIOR_TREE_LIBRARY} PRIVATE ZMQ_FOUND)
-endif()
-
-if(BT_COROUTINES_FOUND)
-    target_link_libraries(${BEHAVIOR_TREE_LIBRARY} PRIVATE
-        ${Boost_LIBRARIES} )
-    target_include_directories(${BEHAVIOR_TREE_LIBRARY} PRIVATE
-        ${Boost_INCLUDE_DIRS} )
 endif()
 
 if(CURSES_FOUND)
