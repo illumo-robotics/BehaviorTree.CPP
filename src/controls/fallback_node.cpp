@@ -25,6 +25,9 @@ NodeStatus FallbackNode::tick()
 {
   const size_t children_count = children_nodes_.size();
 
+  bool all_skipped = true;
+  setStatus(NodeStatus::RUNNING);
+
   while (current_child_idx_ < children_count)
   {
     TreeNode* current_child_node = children_nodes_[current_child_idx_];
@@ -33,10 +36,7 @@ NodeStatus FallbackNode::tick()
     const NodeStatus child_status = current_child_node->executeTick();
 
     // switch to RUNNING state as soon as you find an active child
-    if (child_status != NodeStatus::SKIPPED)
-    {
-      setStatus(NodeStatus::RUNNING);
-    }
+    all_skipped &= (child_status != NodeStatus::SKIPPED);
 
     switch (child_status)
     {
@@ -79,7 +79,7 @@ NodeStatus FallbackNode::tick()
   }
 
   // Skip if ALL the nodes have been skipped
-  return status() == (NodeStatus::RUNNING) ? NodeStatus::FAILURE : NodeStatus::SKIPPED;
+  return all_skipped ? NodeStatus::SKIPPED : NodeStatus::FAILURE;
 }
 
 void FallbackNode::halt()
