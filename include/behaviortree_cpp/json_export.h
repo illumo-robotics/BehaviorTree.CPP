@@ -15,9 +15,7 @@ namespace BT
 *
 *  For instance the type Foo requires the implementation:
 *
-*   namespace nlohmann {
-*      void to_json(json& j, const Foo& f);
-*   }
+*   void to_json(json& j, const Foo& f);
 *
 *  Later, you MUST register this calling:
 *

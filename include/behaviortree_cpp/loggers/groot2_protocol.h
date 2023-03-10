@@ -5,6 +5,11 @@
 #include <cstring>
 #include <stdexcept>
 #include <random>
+#include <memory>
+#include <condition_variable>
+#include <mutex>
+#include "behaviortree_cpp/basic_types.h"
+#include "behaviortree_cpp/utils/json.hpp"
 
 namespace BT::Monitor {
 
@@ -33,9 +38,11 @@ enum RequestType : uint8_t
   // Groot requests to remove a breakpoint
   BREAKPOINT_REMOVE = 'R',
   // Notify Groot that we reached a breakpoint
-  BREAKPOINT_NOTIFY = 'N',
+  BREAKPOINT_REACHED = 'N',
   // Groot will unlock a breakpoint
   BREAKPOINT_UNLOCK = 'U',
+  // receive the existing breakpoints in JSON format
+  BREAKPOINTS_DUMP = 'D',
 
   // Remove all breakpoints. To be done before disconnecting Groot
   REMOVE_ALL_BREAKPOINTS = 'A',
@@ -47,21 +54,21 @@ inline const char* ToString(const RequestType& type)
 {
   switch(type)
   {
-  case RequestType::FULLTREE: return "FullTree";
-  case RequestType::STATUS: return "Status";
-  case RequestType::BLACKBOARD: return "BlackBoard";
+  case RequestType::FULLTREE: return "full_tree";
+  case RequestType::STATUS: return "status";
+  case RequestType::BLACKBOARD: return "blackboard";
 
-  case RequestType::BREAKPOINT_INSERT: return "BreakpointInsert";
-  case RequestType::BREAKPOINT_REMOVE: return "BreakpointRemove";
-  case RequestType::BREAKPOINT_NOTIFY: return "BreakpointNotify";
-  case RequestType::BREAKPOINT_UNLOCK: return "BreakpointUnlock";
-  case RequestType::REMOVE_ALL_BREAKPOINTS: return "BreakpointRemoveAll";
+  case RequestType::BREAKPOINT_INSERT: return "breakpoint_insert";
+  case RequestType::BREAKPOINT_REMOVE: return "breakpoint_remove";
+  case RequestType::BREAKPOINT_REACHED: return "breakpoint_reached";
+  case RequestType::BREAKPOINT_UNLOCK: return "breakpoint_unlock";
+  case RequestType::REMOVE_ALL_BREAKPOINTS: return "breakpoint_remove_all";
+  case RequestType::BREAKPOINTS_DUMP: return "breakpoints_dump";
 
-  case RequestType::UNDEFINED: return "UNDEFINED";
+  case RequestType::UNDEFINED: return "undefined";
   }
-  return "Undefined";
+  return "undefined";
 }
-
 
 constexpr uint8_t kProtocolID = 1;
 using TreeUniqueUUID = std::array<char, 16>;
@@ -170,6 +177,53 @@ inline ReplyHeader DeserializeReplyHeader(const std::string& buffer)
   unsigned const offset = 6;
   Deserialize(buffer.data(), offset, header.tree_id);
   return header;
+}
+
+struct Breakpoint
+{
+  using Ptr = std::shared_ptr<Breakpoint>;
+
+  // used to enable/disable the breakpoint
+  bool enabled = true;
+
+  uint16_t node_uid = 0;
+
+  // interactive breakpoints are unblucked using unlockBreakpoint()
+  bool is_interactive = true;
+
+  // used by interactive breakpoints to wait for unlocking
+  std::condition_variable wakeup;
+
+  std::mutex mutex;
+
+  // set to true to unlock an interactive breakpoint
+  bool ready = false;
+
+  // once finished self-destroy
+  bool remove_when_done = false;
+
+  // result to be returned
+  NodeStatus desired_status = NodeStatus::SKIPPED;
+};
+
+
+void to_json(nlohmann::json& js, const Breakpoint& bp) {
+  js = nlohmann::json {
+      {"enabled", bp.enabled},
+      {"uid", bp.node_uid},
+      {"interactive", bp.is_interactive},
+      {"once", bp.remove_when_done},
+      {"desired_status", toStr(bp.desired_status)}
+  };
+}
+
+void from_json(const nlohmann::json& js, Breakpoint& bp) {
+  js.at("enabled").get_to(bp.enabled);
+  js.at("uid").get_to(bp.node_uid);
+  js.at("interactive").get_to(bp.is_interactive);
+  js.at("once").get_to(bp.remove_when_done);
+  const std::string desired_value = js.at("desired_status").get<std::string>();
+  bp.desired_status = convertFromString<NodeStatus>(desired_value);
 }
 
 }

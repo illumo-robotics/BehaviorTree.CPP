@@ -195,16 +195,19 @@ void Groot2Publisher::serverLoop()
 
     switch(request_header.type)
     {
-      case Monitor::RequestType::FULLTREE: {
+      case Monitor::RequestType::FULLTREE:
+      {
         reply_msg.addstr( tree_xml_ );
       } break;
 
-      case Monitor::RequestType::STATUS: {
+      case Monitor::RequestType::STATUS:
+      {
         std::unique_lock<std::mutex> lk(status_mutex_);
         reply_msg.addstr( status_buffer_ );
       } break;
 
-      case Monitor::RequestType::BLACKBOARD: {
+      case Monitor::RequestType::BLACKBOARD:
+      {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
           continue;
@@ -214,46 +217,25 @@ void Groot2Publisher::serverLoop()
         reply_msg.addmem(msg.data(), msg.size());
       } break;
 
-      case Monitor::RequestType::BREAKPOINT_INSERT: {
+      case Monitor::RequestType::BREAKPOINT_INSERT:
+      {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
           continue;
         }
-        auto str_parts = splitString(requestMsg[1].to_string_view(), ';');
-        uint16_t const node_uid = uint16_t(std::stoi( std::string(str_parts[0])));
 
-        bool once = false;
-        bool interactive = true;
-        NodeStatus desired_result = NodeStatus::SKIPPED;
-        for(size_t i=1; i<str_parts.size(); i++)
-        {
-          if(str_parts[i] == "once")
-          {
-            once = true;
-          }
-          else if(str_parts[i] == "force_success")
-          {
-            interactive = false;
-            desired_result = NodeStatus::SUCCESS;
-          }
-          else if(str_parts[i] == "force_failure")
-          {
-            interactive = false;
-            desired_result = NodeStatus::FAILURE;
-          }
-        }
+        auto const received_json = nlohmann::json::parse(requestMsg[1].to_string());
+        uint16_t const node_uid = received_json["uid"].get<uint16_t>();
 
-        auto breakpoint = getBreakpoint(node_uid);
         // if it exists already, we want to modify this in place
-        if(breakpoint)
+        if(auto breakpoint = getBreakpoint(node_uid))
         {
           std::unique_lock<std::mutex> lk(breakpoint->mutex);
           bool was_interactive = breakpoint->is_interactive;
-          breakpoint->is_interactive = interactive;
-          breakpoint->remove_when_done = once;
-          breakpoint->desired_result = desired_result;
+          BT::Monitor::from_json(received_json, *breakpoint);
+
           // if it WAS interactive and it is not anymore, unlock it
-          if(was_interactive && !interactive)
+          if(was_interactive && !breakpoint->is_interactive)
           {
             lk.unlock();
             breakpoint->wakeup.notify_all();
@@ -261,13 +243,10 @@ void Groot2Publisher::serverLoop()
         }
         else // if not found, create a new one
         {
-          breakpoint = std::make_shared<Breakpoint>();
-          breakpoint->node_uid = node_uid;
-          breakpoint->is_interactive = interactive;
-          breakpoint->remove_when_done = once;
-          breakpoint->desired_result = desired_result;
+          auto new_breakpoint = std::make_shared<Monitor::Breakpoint>();
+          BT::Monitor::from_json(received_json, *new_breakpoint);
 
-          if(!insertBreakpoint(breakpoint))
+          if(!insertBreakpoint(new_breakpoint))
           {
             sendErrorReply("Node ID not found");
             continue;
@@ -275,7 +254,8 @@ void Groot2Publisher::serverLoop()
         }
       } break;
 
-      case Monitor::RequestType::BREAKPOINT_UNLOCK: {
+      case Monitor::RequestType::BREAKPOINT_UNLOCK:
+      {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
           continue;
@@ -308,11 +288,13 @@ void Groot2Publisher::serverLoop()
         }
       } break;
 
-      case Monitor::RequestType::REMOVE_ALL_BREAKPOINTS: {
+      case Monitor::RequestType::REMOVE_ALL_BREAKPOINTS:
+      {
         removeAllBreakpoints();
       } break;
 
-      case Monitor::RequestType::BREAKPOINT_REMOVE: {
+      case Monitor::RequestType::BREAKPOINT_REMOVE:
+      {
         if(requestMsg.size() != 2) {
           sendErrorReply("must be 2 parts message");
           continue;
@@ -325,6 +307,16 @@ void Groot2Publisher::serverLoop()
         }
       } break;
 
+      case Monitor::RequestType::BREAKPOINTS_DUMP:
+      {
+        std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
+        auto json_breakpoints = nlohmann::json::array();
+        for(auto [node_uid, breakpoint]: pre_breakpoints_)
+        {
+          json_breakpoints.push_back( *breakpoint );
+        }
+        reply_msg.addstr( json_breakpoints.dump() );
+      } break;
       default: {
         sendErrorReply("Request not recognized");
         continue;
@@ -387,7 +379,7 @@ Groot2Publisher::generateBlackboardsDump(const std::string &bb_list)
   return nlohmann::json::to_msgpack(json);
 }
 
-bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint)
+bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Monitor::Breakpoint> breakpoint)
 {
   auto const node_uid = breakpoint->node_uid;
   auto it = nodes_by_uid_.find(node_uid);
@@ -410,7 +402,7 @@ bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint)
     }
 
     // Notify that a breakpoint was reached, using the zmq_->publisher
-    Monitor::RequestHeader breakpoint_request(Monitor::BREAKPOINT_NOTIFY);
+    Monitor::RequestHeader breakpoint_request(Monitor::BREAKPOINT_REACHED);
     zmq::multipart_t request_msg;
     request_msg.addstr( Monitor::SerializeHeader(breakpoint_request) );
     request_msg.addstr(std::to_string(breakpoint->node_uid));
@@ -437,7 +429,7 @@ bool Groot2Publisher::insertBreakpoint(std::shared_ptr<Breakpoint> breakpoint)
       pre_breakpoints_.erase(breakpoint->node_uid);
       node.setPreTickFunction({});
     }
-    return breakpoint->desired_result;
+    return breakpoint->desired_status;
   };
 
   std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
@@ -468,7 +460,7 @@ bool Groot2Publisher::unlockBreakpoint(uint16_t node_uid, NodeStatus result, boo
 
   {
     std::unique_lock<std::mutex> lk(breakpoint->mutex);
-    breakpoint->desired_result = result;
+    breakpoint->desired_status = result;
     breakpoint->remove_when_done |= remove;
     if(breakpoint->is_interactive)
     {
@@ -515,7 +507,6 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
       breakpoint->wakeup.notify_all();
     }
   }
-
   return true;
 }
 
@@ -536,7 +527,7 @@ void Groot2Publisher::removeAllBreakpoints()
   }
 }
 
-Groot2Publisher::Breakpoint::Ptr Groot2Publisher::getBreakpoint(uint16_t node_uid)
+Monitor::Breakpoint::Ptr Groot2Publisher::getBreakpoint(uint16_t node_uid)
 {
     std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
     auto bk_it = pre_breakpoints_.find(node_uid);
