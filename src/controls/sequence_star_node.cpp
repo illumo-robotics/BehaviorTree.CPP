@@ -25,7 +25,10 @@ NodeStatus SequenceWithMemory::tick()
 {
   const size_t children_count = children_nodes_.size();
 
-  bool all_skipped = true;
+  if(status() == NodeStatus::IDLE)
+  {
+    all_skipped_ = true;
+  }
   setStatus(NodeStatus::RUNNING);
 
   while (current_child_idx_ < children_count)
@@ -36,7 +39,7 @@ NodeStatus SequenceWithMemory::tick()
     const NodeStatus child_status = current_child_node->executeTick();
 
     // switch to RUNNING state as soon as you find an active child
-    all_skipped &= (child_status != NodeStatus::SKIPPED);
+    all_skipped_ &= (child_status == NodeStatus::SKIPPED);
 
     switch (child_status)
     {
@@ -84,7 +87,7 @@ NodeStatus SequenceWithMemory::tick()
     current_child_idx_ = 0;
   }
   // Skip if ALL the nodes have been skipped
-  return all_skipped ? NodeStatus::SKIPPED : NodeStatus::SUCCESS;
+  return all_skipped_ ? NodeStatus::SKIPPED : NodeStatus::SUCCESS;
 }
 
 void SequenceWithMemory::halt()

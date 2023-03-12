@@ -40,6 +40,7 @@ public:
 
 private:
   size_t current_child_idx_;
+  bool all_skipped_;
 
   virtual BT::NodeStatus tick() override;
 };

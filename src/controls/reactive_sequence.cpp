@@ -26,7 +26,7 @@ NodeStatus ReactiveSequence::tick()
     const NodeStatus child_status = current_child_node->executeTick();
 
     // switch to RUNNING state as soon as you find an active child
-    all_skipped &= (child_status != NodeStatus::SKIPPED);
+    all_skipped &= (child_status == NodeStatus::SKIPPED);
 
     switch (child_status)
     {

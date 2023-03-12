@@ -43,7 +43,10 @@ NodeStatus RepeatNode::tick()
   }
 
   bool do_loop = repeat_count_ < num_cycles_ || num_cycles_ == -1;
-  bool all_skipped = true;
+  if(status() == NodeStatus::IDLE)
+  {
+    all_skipped_ = true;
+  }
   setStatus(NodeStatus::RUNNING);
 
   while (do_loop)
@@ -52,7 +55,7 @@ NodeStatus RepeatNode::tick()
     NodeStatus child_status = child_node_->executeTick();
 
     // switch to RUNNING state as soon as you find an active child
-    all_skipped &= (child_status != NodeStatus::SKIPPED);
+    all_skipped_ &= (child_status == NodeStatus::SKIPPED);
 
     switch (child_status)
     {
@@ -94,7 +97,7 @@ NodeStatus RepeatNode::tick()
   }
 
   repeat_count_ = 0;
-  return all_skipped ? NodeStatus::SKIPPED : NodeStatus::SUCCESS;
+  return all_skipped_ ? NodeStatus::SKIPPED : NodeStatus::SUCCESS;
 }
 
 void RepeatNode::halt()
