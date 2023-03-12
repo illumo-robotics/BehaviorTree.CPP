@@ -47,6 +47,8 @@ enum RequestType : uint8_t
   // Remove all breakpoints. To be done before disconnecting Groot
   REMOVE_ALL_BREAKPOINTS = 'A',
 
+  DISABLE_ALL_BREAKPOINTS = 'X',
+
   UNDEFINED = 0,
 };
 
@@ -64,6 +66,7 @@ inline const char* ToString(const RequestType& type)
   case RequestType::BREAKPOINT_UNLOCK: return "breakpoint_unlock";
   case RequestType::REMOVE_ALL_BREAKPOINTS: return "breakpoint_remove_all";
   case RequestType::BREAKPOINTS_DUMP: return "breakpoints_dump";
+  case RequestType::DISABLE_ALL_BREAKPOINTS: return "disable_breakpoints";
 
   case RequestType::UNDEFINED: return "undefined";
   }

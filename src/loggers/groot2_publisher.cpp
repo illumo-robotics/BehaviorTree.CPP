@@ -237,6 +237,7 @@ void Groot2Publisher::serverLoop()
           // if it WAS interactive and it is not anymore, unlock it
           if(was_interactive && !breakpoint->is_interactive)
           {
+            breakpoint->ready = true;
             lk.unlock();
             breakpoint->wakeup.notify_all();
           }
@@ -293,6 +294,11 @@ void Groot2Publisher::serverLoop()
         removeAllBreakpoints();
       } break;
 
+      case Monitor::RequestType::DISABLE_ALL_BREAKPOINTS:
+      {
+        enableAllBreakpoints(false);
+      } break;
+
       case Monitor::RequestType::BREAKPOINT_REMOVE:
       {
         if(requestMsg.size() != 2) {
@@ -327,6 +333,22 @@ void Groot2Publisher::serverLoop()
   }
 }
 
+void BT::Groot2Publisher::enableAllBreakpoints(bool enable)
+{
+  std::unique_lock<std::mutex> lk(breakpoints_map_mutex_);
+  for(auto& [node_uid, breakpoint]: pre_breakpoints_)
+  {
+    std::unique_lock<std::mutex> lk(breakpoint->mutex);
+    breakpoint->enabled = enable;
+    // when disabling, remember to wake up blocked ones
+    if(!breakpoint->enabled && breakpoint->is_interactive)
+    {
+      lk.unlock();
+      breakpoint->wakeup.notify_all();
+    }
+  }
+}
+
 void Groot2Publisher::heartbeatLoop()
 {
   bool has_heartbeat = true;
@@ -343,17 +365,7 @@ void Groot2Publisher::heartbeatLoop()
     // if we loose or gain heartbeat, disable/enable all breakpoints
     if(has_heartbeat != prev_heartbeat)
     {
-      for(auto& [node_uid, breakpoint]: pre_breakpoints_)
-      {
-        std::unique_lock<std::mutex> lk(breakpoint->mutex);
-        breakpoint->enabled = has_heartbeat;
-        // when disabling, remember to wake up blocked ones
-        if(!breakpoint->enabled && breakpoint->is_interactive)
-        {
-          lk.unlock();
-          breakpoint->wakeup.notify_all();
-        }
-      }
+      enableAllBreakpoints(has_heartbeat);
     }
   }
 }
@@ -505,6 +517,7 @@ bool Groot2Publisher::removeBreakpoint(uint16_t node_uid)
       breakpoint->enabled = false;
       lk.unlock();
       breakpoint->wakeup.notify_all();
+      std::cout << "disable " << node_uid << std::endl;
     }
   }
   return true;

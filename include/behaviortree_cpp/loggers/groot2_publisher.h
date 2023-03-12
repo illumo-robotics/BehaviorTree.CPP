@@ -73,6 +73,7 @@ class Groot2Publisher : public StatusChangeLogger
 
   struct Pimpl;
   Pimpl* zmq_;
+  void enableAllBreakpoints(bool enable);
 };
 }   // namespace BT
 
