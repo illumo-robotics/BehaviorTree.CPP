@@ -254,3 +254,30 @@ TEST(SubTree, SubtreePlusD)
   auto status = tree.tickWhileRunning();
   ASSERT_EQ(status, BT::NodeStatus::SUCCESS);
 }
+
+TEST(SubTree, ScriptAutoremap)
+{
+  static const char* xml_text = R"(
+
+<root BTCPP_format="4" >
+
+    <BehaviorTree ID="MainTree">
+        <Sequence>
+            <Script code = "value=0' " />
+            <SubTree ID="mySubtree" _autoremap="1"  />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="mySubtree">
+        <Script code = "value=1' " />
+    </BehaviorTree>
+</root> )";
+
+  BT::BehaviorTreeFactory factory;
+  factory.registerBehaviorTreeFromText(xml_text);
+
+  Tree tree = factory.createTree("MainTree");
+
+  ASSERT_EQ(tree.subtrees[1]->blackboard->get<int>("value"), 1);
+  ASSERT_EQ(tree.subtrees[0]->blackboard->get<int>("value"), 1);
+}

@@ -18,7 +18,7 @@ static const char* xml_text = R"(
                 <Inverter>
                     <IsDoorClosed/>
                 </Inverter>
-                <SubTree ID="DoorClosed"/>
+                <SubTree ID="DoorClosed" _autoremap="1"/>
             </Fallback>
             <PassThroughDoor/>
         </Sequence>
