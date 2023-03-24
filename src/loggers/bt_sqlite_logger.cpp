@@ -1,54 +1,53 @@
 #include "behaviortree_cpp/loggers/bt_sqlite_logger.h"
+#include "behaviortree_cpp/loggers/contrib/sqlite.hpp"
+#include "behaviortree_cpp/xml_parsing.h"
 
 namespace BT {
-/*
-struct SqliteLogger::PimplDB
-{
-  PimplDB(const char *filename): db(filename, SQLite::OPEN_READWRITE |SQLite::OPEN_CREATE)
-  {}
 
-  SQLite::Database db;
-};
 
 SqliteLogger::SqliteLogger(const Tree &tree,
-                           const char *filename,
+                           std::filesystem::path const& file,
                            bool append):
-      StatusChangeLogger(tree.rootNode()),
-      p_(new SqliteLogger::PimplDB(filename))
+  StatusChangeLogger(tree.rootNode())
 {
   enableTransitionToIdle(true);
 
-  p_->db.exec("CREATE TABLE IF NOT EXISTS Transitions ("
-              "timestamp  INTEGER PRIMARY KEY, "
-              "uid        INTEGER, "
-              "duration   INTEGER, "
-              "prev_state TEXT NOT NULL, "
-              "state      TEXT NOT NULL)");
+  db_ = std::make_unique<sqlite::Connection>(file.string());
 
-  p_->db.exec("CREATE TABLE IF NOT EXISTS Nodes ("
-              "uid        INTEGER PRIMARY KEY UNIQUE, "
-              "node_type  TEXT NOT NULL, "
-              "node_name  TEXT NOT NULL, "
-              "instance   TEXT)");
+  sqlite::Statement(*db_,
+                    "CREATE TABLE IF NOT EXISTS Transitions ("
+                    "timestamp  INTEGER PRIMARY KEY NOT NULL, "
+                    "session_id INTEGER NOT NULL, "
+                    "uid        INTEGER NOT NULL, "
+                    "duration   INTEGER, "
+                    "state      INTEGER NOT NULL);");
 
-  p_->db.exec("PRAGMA journal_mode=WAL");
+  sqlite::Statement(*db_,
+                    "CREATE TABLE IF NOT EXISTS Definitions ("
+                    "session_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "date       TEXT NOT NULL,"
+                    "xml_tree   TEXT NOT NULL);");
+
+  sqlite::Statement(*db_, "PRAGMA journal_mode=WAL;");
 
   if( !append )
   {
-    p_->db.exec("DELETE from Transitions;");
+    sqlite::Statement(*db_, "DELETE from Transitions;");
+    sqlite::Statement(*db_, "DELETE from Definitions;");
   }
-  p_->db.exec("DELETE from Nodes;");
 
-  for(const auto& node: tree.nodes)
+  auto tree_xml = WriteTreeToXML(tree, true);
+  sqlite::Statement(*db_,
+                    "INSERT into Definitions (date, xml_tree) "
+                    "VALUES (datetime('now','localtime'),?);",
+                    tree_xml);
+
+  auto res = sqlite::Query(*db_, "SELECT MAX(session_id) FROM Definitions LIMIT 1;");
+
+  while(res.Next())
   {
-    SQLite::Statement   query(p_->db, "INSERT INTO Nodes VALUES (?, ?, ?, ?)");
-    query.bind(1, node->UID());
-    query.bind(2, toStr(node->type()));
-    query.bind(3, node->registrationName());
-    query.bind(4, node->name());
-    query.exec();
+    session_id_ = res.Get(0);
   }
-
 }
 
 SqliteLogger::~SqliteLogger()
@@ -83,28 +82,18 @@ void SqliteLogger::callback(Duration timestamp,
     }
   }
 
-  auto ToChar = [](NodeStatus stat) ->const char *
-  {
-    if( stat == NodeStatus::RUNNING ) return "R";
-    if( stat == NodeStatus::SUCCESS ) return "S";
-    if( stat == NodeStatus::FAILURE ) return "F";
-    return "I";
-  };
-
-  SQLite::Statement query(p_->db, "INSERT INTO Transitions VALUES (?, ?, ?, ?, ?)");
-  query.bind(1, monotonic_timestamp_);
-  query.bind(2, node.UID());
-  query.bind(3, elapsed_time);
-  query.bind(4, ToChar(prev_status));
-  query.bind(5, ToChar(status));
-
-  query.exec();
-
+  sqlite::Statement(*db_,
+                    "INSERT INTO Transitions VALUES (?, ?, ?, ?, ?)",
+                    monotonic_timestamp_,
+                    session_id_,
+                    node.UID(),
+                    elapsed_time,
+                    static_cast<int>(status));
 }
 
 void SqliteLogger::flush()
 {
-  p_->db.flush();
-}*/
+}
+
 
 }

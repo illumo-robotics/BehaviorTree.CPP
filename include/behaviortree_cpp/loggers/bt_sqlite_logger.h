@@ -1,7 +1,12 @@
 #ifndef BT_SQLITE_LOGGER_H
 #define BT_SQLITE_LOGGER_H
 
+#include <filesystem>
 #include "behaviortree_cpp/loggers/abstract_logger.h"
+
+namespace sqlite{
+class Connection;
+}
 
 namespace BT
 {
@@ -9,7 +14,9 @@ namespace BT
 class SqliteLogger : public StatusChangeLogger
 {
 public:
-  SqliteLogger(const Tree &tree, const char* filename, bool append = false);
+  SqliteLogger(const Tree &tree,
+               std::filesystem::path const& file,
+               bool append = false);
 
   virtual ~SqliteLogger() override;
 
@@ -21,11 +28,13 @@ public:
   virtual void flush() override;
 
 private:
-  struct PimplDB;
-  std::unique_ptr<PimplDB> p_;
+  std::unique_ptr<sqlite::Connection> db_;
 
   long monotonic_timestamp_ = 0;
   std::unordered_map<const BT::TreeNode*, long> starting_time_;
+
+  int session_id_ = -1;
+
 };
 
 
