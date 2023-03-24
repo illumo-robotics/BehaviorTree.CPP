@@ -30,7 +30,7 @@ public:
 private:
   std::unique_ptr<sqlite::Connection> db_;
 
-  long monotonic_timestamp_ = 0;
+  int64_t monotonic_timestamp_ = 0;
   std::unordered_map<const BT::TreeNode*, long> starting_time_;
 
   int session_id_ = -1;

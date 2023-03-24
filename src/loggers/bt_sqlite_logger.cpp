@@ -62,7 +62,7 @@ void SqliteLogger::callback(Duration timestamp,
 {
 
   using namespace std::chrono;
-  auto tm_usec = duration_cast<microseconds>(timestamp).count();
+  int64_t tm_usec = int64_t(duration_cast<microseconds>(timestamp).count());
   monotonic_timestamp_ = std::max( monotonic_timestamp_ + 1, tm_usec);
 
   long elapsed_time = 0;
