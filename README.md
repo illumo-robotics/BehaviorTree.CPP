@@ -72,7 +72,7 @@ Assuming that you are in the **parent** directory of `BehaviorTree.CPP`:
 
     mkdir build; cd build
     conan install ../BehaviorTree.CPP --output-folder=. --build=missing
-    cmake ../BehaviorTree.CPP
+    cmake ../BehaviorTree.CPP -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake
     cmake --build . --parallel
 
 If you want to use BT.CPP in your application, please refer to the

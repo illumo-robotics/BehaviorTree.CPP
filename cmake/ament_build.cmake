@@ -2,18 +2,20 @@
 set(CMAKE_CONFIG_PATH ${CMAKE_MODULE_PATH}  "${PROJECT_SOURCE_DIR}/cmake")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CONFIG_PATH}")
 
-find_package(ZeroMQ)
+if(BTCPP_GROOT_INTERFACE)
+    find_package(ZeroMQ REQUIRED)
+endif()
 
-if(BTCPP_MANUAL_SELECTOR)
-    find_package(Curses REQUIRED)
+if(BTCPP_SQLITE_LOGGING)
+    find_package(SQLite3 REQUIRED)
 endif()
 
 find_package(ament_index_cpp REQUIRED)
 
 set( BTCPP_EXTRA_LIBRARIES
     $<BUILD_INTERFACE:ament_index_cpp::ament_index_cpp>
-    $<BUILD_INTERFACE:${ZeroMQ_LIBRARIES}>
-    ${CURSES_LIBRARIES}
+    ${ZeroMQ_LIBRARIES}
+    ${SQLite3_LIBRARIES}
 )
 
 ament_export_dependencies(ament_index_cpp)
