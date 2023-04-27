@@ -157,8 +157,12 @@ void Groot2Publisher::serverLoop()
   active_server_ = true;
   auto& socket = zmq_->server;
 
-  auto sendErrorReply = [&socket](const std::string& msg)
+  auto sendErrorReply = [&socket, this](const std::string& msg)
   {
+    if(verbose_) {
+      std::cout << "ErrorReply: " << msg << std::endl;
+    }
+
     zmq::multipart_t error_msg;
     error_msg.addstr("error");
     error_msg.addstr(msg);
@@ -187,6 +191,10 @@ void Groot2Publisher::serverLoop()
 
     auto request_header = Monitor::DeserializeRequestHeader(request_str);
 
+    if(verbose_) {
+      std::cout << "request_received: " << ToString(request_header.type) << std::endl;
+    }
+
     Monitor::ReplyHeader reply_header;
     reply_header.request = request_header;
     reply_header.tree_id = serialized_uuid;
@@ -199,6 +207,11 @@ void Groot2Publisher::serverLoop()
       case Monitor::RequestType::FULLTREE:
       {
         reply_msg.addstr( tree_xml_ );
+
+        if(verbose_) {
+          std::cout << "---- tree_xml ----n" << tree_xml_
+                    << "------------" << std::endl;
+        }
       } break;
 
       case Monitor::RequestType::STATUS:
@@ -340,6 +353,9 @@ void Groot2Publisher::serverLoop()
     }
     // send the reply
     reply_msg.send(socket);
+    if(verbose_) {
+        std::cout << "reply sent: payload size :" << reply_msg[1].size() << std::endl;
+    }
   }
 }
 

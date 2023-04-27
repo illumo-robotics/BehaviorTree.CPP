@@ -20,6 +20,10 @@ class Groot2Publisher : public StatusChangeLogger
 
   ~Groot2Publisher() override;
 
+  void setVerbose(bool verbose) {
+    verbose_ = verbose;
+  }
+
   private:
 
   void callback(Duration timestamp,
@@ -75,6 +79,9 @@ class Groot2Publisher : public StatusChangeLogger
 
   struct Pimpl;
   Pimpl* zmq_;
+
+  bool verbose_ = false;
+
   void enableAllHooks(bool enable);
 };
 }   // namespace BT
