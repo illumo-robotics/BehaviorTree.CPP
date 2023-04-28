@@ -68,6 +68,10 @@ BehaviorTreeFactory::BehaviorTreeFactory()
   registerNodeType<SwitchNode<5>>("Switch5");
   registerNodeType<SwitchNode<6>>("Switch6");
 
+  registerNodeType<LoopNode<double>>("LoopDoubleQueue");
+  registerNodeType<LoopNode<Any>>("LoopAnyQueue");
+  registerNodeType<LoopNode<std::string>>("LoopStringQueue");
+
   for (const auto& it : builders_)
   {
     builtin_IDs_.insert(it.first);

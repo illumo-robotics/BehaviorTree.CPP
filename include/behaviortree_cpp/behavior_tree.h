@@ -44,6 +44,7 @@
 #include "behaviortree_cpp/decorators/script_precondition.h"
 #include "behaviortree_cpp/decorators/timeout_node.h"
 #include "behaviortree_cpp/decorators/delay_node.h"
+#include "behaviortree_cpp/decorators/loop_node.h"
 
 #include <iostream>
 
