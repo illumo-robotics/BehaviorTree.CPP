@@ -103,7 +103,7 @@ Copyright (c) 2014-2018 Michele Colledanchise
 
 Copyright (c) 2018-2019 Davide Faconti, Eurecat
 
-Copyright (c) 2019-2022 Davide Faconti
+Copyright (c) 2019-2023 Davide Faconti
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
